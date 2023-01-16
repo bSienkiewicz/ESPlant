@@ -20,14 +20,15 @@ int refresh_time;
 int g_moisture_percentage;
 int max_moist;
 int min_moist;
+bool non_stop_pump;
 int pump_time;
 int cfg_v;
 
 // WiFi authentication
-// const char* ssid      = "TP-Link Home -Ext";
-// const char* password  = "03Waldek70";
-const char* ssid = "iPhone (Bartek)";
-const char* password = "jpjpjpjp";
+const char* ssid = "TP-Link Home -Ext";
+const char* password = "03Waldek70";
+// const char* ssid = "iPhone (Bartek)";
+// const char* password = "jpjpjpjp";
 
 // API URL
 const String serverName = "https://esplant.onrender.com";
@@ -37,8 +38,10 @@ const String CONFIG_ENDPOINT = "/api/esp_1/config";
 WiFiClientSecure client;
 const char* fingerpr = "ED 14 5F CE AE 85 72 12 C2 17 42 3C 6D 61 F5 D3 F1 61 9B 8D";
 HTTPClient http;
-StaticJsonDocument<120> doc;
-StaticJsonDocument<120> config_doc;
+StaticJsonDocument<180> doc;
+StaticJsonDocument<180> config_doc;
+
+unsigned long time_now = 0;
 
 
 /*************************************************************/
@@ -51,7 +54,7 @@ void setup() {
   pinMode(trigPin, OUTPUT);   // Sets the trigPin as an Output
   pinMode(echoPin, INPUT);    // Sets the echoPin as an Input
   pinMode(relayPin, OUTPUT);  // Sets the relayPin as an Output
-  digitalWrite(relayPin,HIGH);
+  digitalWrite(relayPin, HIGH);
   ledON(false);
   connectToWiFi();
   client.setFingerprint(fingerpr);
@@ -90,9 +93,41 @@ void loop() {
   doc["min_moist"] = min_moist;
   doc["pump_time"] = pump_time;
   doc["refresh_time"] = refresh_time;
+  doc["non_stop_pump"] = non_stop_pump;
   serializeJson(doc, json);
   if (json[0] != '{' || WiFi.status() != WL_CONNECTED) return;
 
+  if (non_stop_pump) {
+    digitalWrite(relayPin, LOW);
+  } else {
+    digitalWrite(relayPin, HIGH);
+  }
+
+  if (millis() >= time_now + refresh_time) {  // SEND updates every X seconds.
+    if ((g_moisture_percentage < min_moist + (min_moist * 0.2)) && !non_stop_pump) {     // if moist lower than min
+      while (g_moisture_percentage < max_moist - (max_moist * 0.1)) {                    // pump until reaching max
+        digitalWrite(relayPin, LOW);
+        delay(1300);
+        digitalWrite(relayPin, HIGH);
+        delay(pump_time);
+        readMoisture();
+      }
+    }
+
+    PostUpdates(json);
+    time_now = millis();
+  } else manualUpdateConfig();
+
+
+  Serial.println(json);
+  delay(500);
+}
+
+/*************************************************************/
+/* FUNCTIONS                                                 */
+/*************************************************************/
+
+void PostUpdates(String json) {
   if (POST_UPDATES) {
     // POST request
     http.begin(client, serverName + POST_ENDPOINT);
@@ -110,25 +145,7 @@ void loop() {
       Serial.println(" // ERROR");
     }
   }
-
-  if (g_moisture_percentage < ( min_moist + (min_moist*0.2)) ) {
-    while (g_moisture_percentage < max_moist - (max_moist*0.1)) {    // PUMPING MODE
-      digitalWrite(relayPin, LOW);
-      delay(1300);
-      digitalWrite(relayPin, HIGH);
-      delay(pump_time);
-      readMoisture();
-    }
-  }
-
-  Serial.println(json);
-  delay(refresh_time);
-} 
-
-/*************************************************************/
-/* FUNCTIONS                                                 */
-/*************************************************************/
-
+}
 
 // Blink led x many times and decide if it stays on after blinking
 void BlinkLed(int times, int del, bool stayON) {
@@ -159,7 +176,7 @@ void updateConfig(String payload) {
   // cleaning up JSON and deserializing
   String payload__new = payload;
   payload.remove(0, 1);                     // REMOVE [
-  payload.remove(payload.length() - 1, 1);  //REMOVE ]
+  payload.remove(payload.length() - 1, 1);  // REMOVE ]
   char payload_arr[payload.length() + 1];
   payload.toCharArray(payload_arr, payload.length() + 1);  // convert to char array for deserialization
   deserializeJson(config_doc, payload_arr);
@@ -170,6 +187,35 @@ void updateConfig(String payload) {
     max_moist = config_doc["max_moist"].as<long>();
     min_moist = config_doc["min_moist"].as<long>();
     pump_time = config_doc["pump_time"].as<long>();
+    non_stop_pump = config_doc["non_stop_pump"].as<bool>();
+    Serial.println(non_stop_pump);
+    cfg_v = config_doc["cfg_v"].as<long>();
+    Serial.print("\n →→→→→→→→→→ Configuration updated. REFRESHING EVERY (ms): ");
+    Serial.println(refresh_time);
+  }
+}
+
+// Calling this function will convert the payload and transform it to config variables
+void manualUpdateConfig() {
+  http.begin(client, serverName + CONFIG_ENDPOINT);
+  http.addHeader("Content-Type", "application/json");
+  int httpResponseCode = http.GET();
+
+  // cleaning up JSON and deserializing
+  String payload = http.getString();
+  payload.remove(0, 1);                     // REMOVE [
+  payload.remove(payload.length() - 1, 1);  // REMOVE ]
+  char payload_arr[payload.length() + 1];
+  payload.toCharArray(payload_arr, payload.length() + 1);  // convert to char array for deserialization
+  deserializeJson(config_doc, payload_arr);
+
+  if (config_doc["cfg_v"] != cfg_v) {
+    refresh_time = config_doc["refresh_time"].as<long>();
+    if (refresh_time < 1000) refresh_time = 1000;  // prevent setting too low
+    max_moist = config_doc["max_moist"].as<long>();
+    min_moist = config_doc["min_moist"].as<long>();
+    pump_time = config_doc["pump_time"].as<long>();
+    non_stop_pump = config_doc["non_stop_pump"].as<long>();
     cfg_v = config_doc["cfg_v"].as<long>();
     Serial.print("\n →→→→→→→→→→ Configuration updated. REFRESHING EVERY (ms): ");
     Serial.println(refresh_time);
