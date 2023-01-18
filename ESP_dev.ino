@@ -2,8 +2,6 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include <FS.h>
-#include <LittleFS.h>
 #define SensorPin A0  // Moisture Sensor
 
 const String DEVICE_NAME = "esp_1";
@@ -22,13 +20,14 @@ int max_moist;
 int min_moist;
 bool non_stop_pump;
 int pump_time;
+int tank_height;
 int cfg_v;
 
 // WiFi authentication
-const char* ssid = "TP-Link Home -Ext";
-const char* password = "03Waldek70";
-// const char* ssid = "iPhone (Bartek)";
-// const char* password = "jpjpjpjp";
+// const char* ssid = "TP-Link Home -Ext";
+// const char* password = "03Waldek70";
+const char* ssid = "iPhone (Bartek)";
+const char* password = "jpjpjpjp";
 
 // API URL
 const String serverName = "https://esplant.onrender.com";
@@ -38,8 +37,8 @@ const String CONFIG_ENDPOINT = "/api/esp_1/config";
 WiFiClientSecure client;
 const char* fingerpr = "ED 14 5F CE AE 85 72 12 C2 17 42 3C 6D 61 F5 D3 F1 61 9B 8D";
 HTTPClient http;
-StaticJsonDocument<180> doc;
-StaticJsonDocument<180> config_doc;
+StaticJsonDocument<230> doc;
+StaticJsonDocument<230> config_doc;
 
 unsigned long time_now = 0;
 
@@ -94,6 +93,7 @@ void loop() {
   doc["pump_time"] = pump_time;
   doc["refresh_time"] = refresh_time;
   doc["non_stop_pump"] = non_stop_pump;
+  doc["tank_height"] = tank_height;
   serializeJson(doc, json);
   if (json[0] != '{' || WiFi.status() != WL_CONNECTED) return;
 
@@ -107,9 +107,9 @@ void loop() {
     if ((g_moisture_percentage < min_moist + (min_moist * 0.2)) && !non_stop_pump) {     // if moist lower than min
       while (g_moisture_percentage < max_moist - (max_moist * 0.1)) {                    // pump until reaching max
         digitalWrite(relayPin, LOW);
-        delay(1300);
-        digitalWrite(relayPin, HIGH);
         delay(pump_time);
+        digitalWrite(relayPin, HIGH);
+        delay(10000);
         readMoisture();
       }
     }
@@ -187,6 +187,7 @@ void updateConfig(String payload) {
     max_moist = config_doc["max_moist"].as<long>();
     min_moist = config_doc["min_moist"].as<long>();
     pump_time = config_doc["pump_time"].as<long>();
+    tank_height = config_doc["tank_height"].as<long>();
     non_stop_pump = config_doc["non_stop_pump"].as<bool>();
     Serial.println(non_stop_pump);
     cfg_v = config_doc["cfg_v"].as<long>();
@@ -224,7 +225,7 @@ void manualUpdateConfig() {
 
 void readProximity() {
   long duration;
-  float distanceCm;
+  float distance_cm;
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
   digitalWrite(trigPin, HIGH);
@@ -232,9 +233,9 @@ void readProximity() {
   digitalWrite(trigPin, LOW);
   duration = pulseIn(echoPin, HIGH);
   // Calculate the distance
-  distanceCm = duration * SOUND_VELOCITY / 2;
+  distance_cm = duration * SOUND_VELOCITY / 2;
   // doc["water_level"] = distanceCm;
-  doc["water_level"] = random(30, 50);
+  doc["water_level"] = 100 - (distance_cm / tank_height * 100);
 }
 
 void connectToWiFi() {
