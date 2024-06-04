@@ -24,10 +24,8 @@ int tank_height;
 int cfg_v;
 
 // WiFi authentication
-// const char* ssid = "TP-Link Home -Ext";
-// const char* password = "03Waldek70";
 const char* ssid = "iPhone (Bartek)";
-const char* password = "jpjpjpjp";
+const char* password = "012345678";
 
 // API URL
 const String serverName = "https://esplant.onrender.com";
